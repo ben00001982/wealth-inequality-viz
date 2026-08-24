@@ -1,0 +1,30 @@
+node_modules/
+dist/
+dist-local/
+*.local
+.DS_Store
+.vite/
+
+# Raw source data is deliberately not committed. The files are large, their licences are per-source,
+# and the acquisition manifest records exactly what to download and where to put it. Committing them
+# would also risk shipping a dataset under terms that do not permit redistribution.
+data/raw/
+data/processed/
+
+# Generated front-end data is not committed either. It is either synthetic placeholder output from
+# scripts/make_synthetic.py, which is regenerable in one command, or real pipeline output, which
+# should be published deliberately rather than drifting into the repository by accident. Keeping it
+# out also removes any chance of a committed placeholder being mistaken for pipeline output.
+# The deploy workflow generates placeholders when the directory is empty, so a fresh clone still
+# builds. Run `npm run data` locally before `npm run dev`.
+public/data/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Playwright smoke test artefacts
+/smoke.mjs
+/test-results/

@@ -1,0 +1,93 @@
+# MOVE THIS FILE TO .github/workflows/deploy.yml
+#
+# It is parked here because the personal access token used to create this repository does not carry
+# the `workflow` scope, so GitHub refuses to write anything under .github/workflows through the API.
+# One local commit puts it where it belongs:
+#
+#   mkdir -p .github/workflows
+#   git mv docs/github-pages-workflow.yml .github/workflows/deploy.yml
+#   git commit -m "Add Pages deploy workflow" && git push
+#
+# Then enable Pages in the repository settings with the source set to GitHub Actions.
+#
+# ---------------------------------------------------------------------------------------------
+#
+# What this workflow does and, more importantly, what it does not.
+#
+# It installs the Node dependencies, builds the site with the Pages base path, and publishes it.
+#
+# It does NOT run the Python cleaning scripts. The raw Office for National Statistics downloads are
+# not committed (see .gitignore, and the reasoning in docs/DATA-PIPELINE.md), so there is nothing for
+# them to read in CI. The data the build serves is therefore either what was committed to
+# public/data, or synthetic placeholders generated here. The second case is safe rather than sloppy:
+# every placeholder declares itself in its own metadata and the artefact shows a standing banner, so
+# a deploy cannot silently ship fake data as though it were findings.
+
+name: Build and deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Python for the data step
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pipeline dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Generate placeholder data if none is committed
+        run: |
+          if ! ls public/data/*.json >/dev/null 2>&1; then
+            echo "public/data holds no JSON: generating synthetic placeholders."
+            python scripts/make_synthetic.py
+          else
+            echo "public/data is populated: using the committed files."
+          fi
+
+      - name: Validate the data files
+        run: python scripts/validate.py
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
