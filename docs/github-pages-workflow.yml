@@ -10,20 +10,27 @@
 #
 # Then enable Pages in the repository settings with the source set to GitHub Actions.
 #
+# Everything below this line is the working tree's .github/workflows/deploy.yml verbatim. Delete
+# this header when the file is moved: the comments in the body are the ones worth keeping.
+#
 # ---------------------------------------------------------------------------------------------
-#
-# What this workflow does and, more importantly, what it does not.
-#
-# It installs the Node dependencies, builds the site with the Pages base path, and publishes it.
-#
-# It does NOT run the Python cleaning scripts. The raw Office for National Statistics downloads are
-# not committed (see .gitignore, and the reasoning in docs/DATA-PIPELINE.md), so there is nothing for
-# them to read in CI. The data the build serves is therefore either what was committed to
-# public/data, or synthetic placeholders generated here. The second case is safe rather than sloppy:
-# every placeholder declares itself in its own metadata and the artefact shows a standing banner, so
-# a deploy cannot silently ship fake data as though it were findings.
 
-name: Build and deploy to GitHub Pages
+# Build the artefact and publish it to GitHub Pages.
+#
+# What this does NOT do, deliberately: it does not run the Python pipeline. The raw Office for
+# National Statistics downloads are not committed (see .gitignore, and the acquisition manifest for
+# why), so the workflow cannot regenerate public/data. It builds whatever data files are committed.
+#
+# The consequence is worth being explicit about, because it is a foot-gun. If public/data holds
+# synthetic placeholders when this runs, the deployed site shows placeholders, with its banner saying
+# so. That is the correct behaviour and the banner is the safeguard, but it means "the site is live"
+# and "the site is showing real data" are two different facts. Check the banner is gone before
+# sending a link to a participant.
+#
+# Pages on a free account requires a public repository. If the repository is private, either make it
+# public before the study or deploy the built site elsewhere.
+
+name: Deploy to GitHub Pages
 
 on:
   push:
@@ -35,9 +42,11 @@ permissions:
   pages: write
   id-token: write
 
+# Never let two deployments race. `cancel-in-progress: false` because a half-finished Pages deploy
+# is worse than a queued one.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -50,31 +59,25 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Set up Python for the data step
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install pipeline dependencies
-        run: pip install -r scripts/requirements.txt
-
-      - name: Generate placeholder data if none is committed
+      # Validate the data before building. A structural failure here is cheaper than discovering it
+      # in a participant's browser, and the validator also fails on a mixed real-and-synthetic set,
+      # which is the dangerous case.
+      - name: Validate data files
         run: |
-          if ! ls public/data/*.json >/dev/null 2>&1; then
-            echo "public/data holds no JSON: generating synthetic placeholders."
-            python scripts/make_synthetic.py
+          python3 -m pip install --quiet pandas openpyxl
+          python3 scripts/validate.py
+
+      - run: npm run build
+
+      - name: Report data provenance
+        run: |
+          if grep -l '"synthetic":true' public/data/*.json >/dev/null 2>&1; then
+            echo "::warning title=Placeholder data::This build serves synthetic placeholder data. The site will show its placeholder banner. Do not send study links against this deployment."
           else
-            echo "public/data is populated: using the committed files."
+            echo "Data files report real pipeline provenance."
           fi
-
-      - name: Validate the data files
-        run: python scripts/validate.py
-
-      - name: Build
-        run: npm run build
 
       - uses: actions/configure-pages@v5
 
