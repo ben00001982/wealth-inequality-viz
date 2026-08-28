@@ -42,6 +42,31 @@ export function useData() {
     let cancelled = false
     const base = import.meta.env.BASE_URL ?? '/'
 
+    /*
+     * Embedded-data path, for the single-file offline build.
+     *
+     * `npm run build:single` produces one self-contained HTML file with the data inlined as
+     * window.__WVIZ_DATA__ and window.__WVIZ_EMBED__ set. That build exists for two real reasons:
+     * the viva needs a demo that works with the network interface disabled, and a reviewer should be
+     * able to open the artefact from a single file without running a server.
+     *
+     * It is a delivery format, not a different artefact. The data objects are the same files
+     * public/data serves, `__meta` blocks included, so the provenance banner behaves identically and
+     * a placeholder build still announces itself.
+     */
+    if (typeof window !== 'undefined' && window.__WVIZ_EMBED__ && window.__WVIZ_DATA__) {
+      const data = window.__WVIZ_DATA__
+      const flags = Object.values(data).map((d) => Boolean(d?.__meta?.synthetic))
+      setState({
+        status: 'ready',
+        data,
+        error: null,
+        synthetic: flags.some(Boolean),
+        mixed: flags.some(Boolean) && flags.some((f) => !f),
+      })
+      return undefined
+    }
+
     async function loadAll() {
       try {
         const entries = await Promise.all(

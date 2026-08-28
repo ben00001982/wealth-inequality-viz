@@ -23,6 +23,29 @@ export const DEFAULT_CONDITION = 'interactive'
  * advertised to the participant. Returns the condition and whether the parameter was present at all.
  */
 export function readCondition(search = window.location.search, history = window.history) {
+  /*
+   * Demo override, and why it is guarded the way it is.
+   *
+   * The single-file offline build (`npm run build:single`) may be opened from a file:// URL or inside
+   * a sandboxed frame, where a query string is not reliably available to the page. So that build
+   * stamps its arm in as window.__WVIZ_CONDITION__.
+   *
+   * This is honoured ONLY when window.__WVIZ_EMBED__ is also true, which only the single-file build
+   * sets. A deployed build never sets it, so a participant's arm can never be decided by anything
+   * other than the URL they were sent. If you ever find yourself wanting to set __WVIZ_EMBED__ on a
+   * hosted build, stop: that would put condition assignment inside the page, where the study cannot
+   * audit it.
+   */
+  if (typeof window !== 'undefined' && window.__WVIZ_EMBED__ && CONDITIONS.includes(window.__WVIZ_CONDITION__)) {
+    return {
+      condition: window.__WVIZ_CONDITION__,
+      parameterPresent: false,
+      parameterValid: true,
+      rawValue: null,
+      source: 'embedded-demo-build',
+    }
+  }
+
   const params = new URLSearchParams(search)
   const raw = params.get('condition')
   const valid = CONDITIONS.includes(raw)
