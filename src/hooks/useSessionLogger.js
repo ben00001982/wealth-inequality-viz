@@ -181,38 +181,91 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [enabled, log])
 
+  /**
+   * Flush the open section when the page goes away.
+   *
+   * Without this, the last thing a reader looked at has no dwell at all: they close the tab, no exit
+   * event ever fires, and the final step or explorer view is silently absent from the analysis. That
+   * is a systematic bias rather than random loss, because the final view is E7, which is the one the
+   * study most wants a dwell for.
+   *
+   * `pagehide` is the hook, and it is the only one. `beforeunload` is unreliable on mobile Safari and
+   * does not fire when a tab is discarded. It writes synchronously to localStorage, which is
+   * permitted during teardown; anything asynchronous would not complete.
+   *
+   * Deliberately NOT hooked to the hidden branch of `visibilitychange`, even though that is the usual
+   * advice for persisting state. Closing the open section on backgrounding would split one step into
+   * two dwell records every time a reader switched tabs, and would make the hidden-time subtraction
+   * in `visibleDwellS` redundant, since a section could never span a hidden interval. The whole point
+   * of tracking `hiddenAccumMs` is to keep the section open across backgrounding and report visible
+   * time within it.
+   *
+   * The residual loss, stated so the analysis knows about it: if a hidden tab is silently discarded by
+   * the browser, `pagehide` may not fire and that one final dwell is lost. The events before it are
+   * already persisted, because every event writes on emission.
+   */
+  useEffect(() => {
+    if (!enabled) return undefined
+    const flush = () => {
+      if (stateRef.current.openSection) closeOpen('page-hidden')
+    }
+    window.addEventListener('pagehide', flush)
+    return () => window.removeEventListener('pagehide', flush)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled])
+
+  /**
+   * Close whatever section or explorer view is currently open, and emit its dwell.
+   *
+   * Defined before the enter and exit helpers because both delegate to it. One function owns the
+   * dwell arithmetic, so a narrative step and an explorer view are measured the same way and the
+   * analysis has one code path rather than two.
+   */
+  const closeOpen = useCallback(
+    (reason) => {
+      const s = stateRef.current
+      const open = s.openSection
+      if (!open) return null
+      const elapsedMs = nowMs() - open.at
+      const hiddenDuringMs = s.hiddenAccumMs - open.hiddenAt
+      s.openSection = null
+      log(EVENT.SECTION_EXIT, {
+        sectionId: open.id,
+        // Whole seconds, per the data management plan's quantisation requirement.
+        dwellS: Math.round(elapsedMs / 1000),
+        visibleDwellS: Math.max(0, Math.round((elapsedMs - hiddenDuringMs) / 1000)),
+        scope: open.scope,
+        ...(reason ? { closedBy: reason } : {}),
+      })
+      return open.id
+    },
+    [log],
+  )
+
+  const openSection = useCallback((id, scope) => {
+    const s = stateRef.current
+    s.openSection = { id, scope, at: nowMs(), hiddenAt: s.hiddenAccumMs }
+  }, [])
+
   const sectionEnter = useCallback(
     (sectionId, navigationSource = 'scroll') => {
       const s = stateRef.current
       // Close any section still open. Scrollama can fire an enter without a matching exit when a
       // fast scroll skips a step, and a keyboard jump deliberately skips several.
-      if (s.openSection && s.openSection.id !== sectionId) {
-        sectionExit(s.openSection.id)
-      }
-      s.openSection = { id: sectionId, at: nowMs(), hiddenAt: s.hiddenAccumMs }
+      if (s.openSection && s.openSection.id !== sectionId) closeOpen('superseded')
+      openSection(sectionId, SCOPE.BOTH)
       log(EVENT.SECTION_ENTER, { sectionId, navigationSource, scope: SCOPE.BOTH })
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [log],
+    [log, closeOpen, openSection],
   )
 
   const sectionExit = useCallback(
     (sectionId) => {
-      const s = stateRef.current
-      const open = s.openSection
+      const open = stateRef.current.openSection
       if (!open || open.id !== sectionId) return
-      const elapsedMs = nowMs() - open.at
-      const hiddenDuringMs = s.hiddenAccumMs - open.hiddenAt
-      s.openSection = null
-      log(EVENT.SECTION_EXIT, {
-        sectionId,
-        // Whole seconds, per the data management plan's quantisation requirement.
-        dwellS: Math.round(elapsedMs / 1000),
-        visibleDwellS: Math.max(0, Math.round((elapsedMs - hiddenDuringMs) / 1000)),
-        scope: SCOPE.BOTH,
-      })
+      closeOpen(null)
     },
-    [log],
+    [closeOpen],
   )
 
   const controlInteraction = useCallback(
@@ -222,9 +275,26 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
     [log],
   )
 
+  /**
+   * Explorer view entry, measured the same way as a narrative step.
+   *
+   * The explorer used to emit an enter event with no matching exit, which meant per-view dwell could
+   * only be recovered by differencing consecutive enters, and the last view a reader looked at had no
+   * duration at all. Routing view changes through the same open and close machinery gives every view
+   * a real `section_exit` with a dwell, tagged interactive-only so the parity filter still keeps it
+   * out of any cross-condition comparison.
+   *
+   * It also closes S18 at the moment of handover rather than whenever the scroll observer next fires,
+   * which is the more accurate boundary for the neck-to-bowl transition.
+   */
   const explorerEntered = useCallback(
-    (view) => log(EVENT.EXPLORER_PHASE_ENTERED, { view, scope: SCOPE.INTERACTIVE_ONLY }),
-    [log],
+    (view) => {
+      const s = stateRef.current
+      if (s.openSection && s.openSection.id !== view) closeOpen('explorer-view-change')
+      log(EVENT.EXPLORER_PHASE_ENTERED, { view, scope: SCOPE.INTERACTIVE_ONLY })
+      openSection(view, SCOPE.INTERACTIVE_ONLY)
+    },
+    [log, closeOpen, openSection],
   )
 
   const sessionComplete = useCallback(
