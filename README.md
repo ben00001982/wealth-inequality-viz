@@ -89,10 +89,6 @@ Vite, React (plain JavaScript), Vega-Lite via react-vega, Scrollama, Python and 
 pipeline, React-aria for accessible controls, localStorage telemetry, deployed to GitHub Pages as a
 static site. The stack was fixed at proposal stage and is not open for substitution, D3 in particular.
 
-Note for anyone following an older tutorial: this uses react-vega version 8, which exposes a single
-`VegaEmbed` component rather than version 7's separate `<Vega>` and `<VegaLite>` components, with the
-renderer and action-menu choices moved into an `options` object.
-
 Two places where the stack constrains the design, both stated in the report rather than worked
 around quietly:
 

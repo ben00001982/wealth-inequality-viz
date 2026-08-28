@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-local/
+dist-single/
 *.local
 .DS_Store
 .vite/
@@ -25,6 +26,13 @@ __pycache__/
 .venv/
 venv/
 
+# Single-file offline builds. Regenerable with `npm run build:single`, and 1.4 MB each, so they are
+# delivered rather than committed.
+/wealth-viz-prototype-*.html
+
 # Playwright smoke test artefacts
 /smoke.mjs
+/smoke-single.mjs
+/dbg.mjs
+/shots.mjs
 /test-results/

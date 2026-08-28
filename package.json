@@ -11,7 +11,8 @@
     "preview:local": "vite preview --outDir dist-local",
     "lint": "oxlint",
     "data": "python scripts/make_synthetic.py",
-    "data:validate": "python scripts/validate.py"
+    "data:validate": "python scripts/validate.py",
+    "build:single": "node scripts/build_singlefile.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
