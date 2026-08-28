@@ -1,0 +1,4 @@
+# Pipeline dependencies. Pinned loosely: these are stable APIs and the pipeline is run by hand
+# rather than in CI, so a minor version drift is not a risk worth a lockfile.
+pandas>=2.0
+openpyxl>=3.1
