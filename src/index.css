@@ -852,3 +852,57 @@ a {
     box-shadow: none;
   }
 }
+
+/* ---------- The study return panel ---------- */
+
+.return-panel {
+  margin-top: 4rem;
+  padding: 1.5rem;
+  border: 2px solid var(--emphasis);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--emphasis) 4%, var(--paper));
+  max-width: 44rem;
+}
+
+.return-panel__note {
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.return-panel__warn {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #8a4b00;
+  background: var(--warn-bg);
+  border-left: 3px solid var(--warn-border);
+  padding: 0.6rem 0.8rem;
+}
+
+.return-panel__code {
+  margin: 1rem 0;
+}
+
+.return-panel__code label {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: var(--ink-muted);
+  margin-bottom: 0.3rem;
+}
+
+.return-panel__code textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding: 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  resize: vertical;
+  /* Break the long opaque code rather than letting it scroll out of sight. */
+  word-break: break-all;
+}
