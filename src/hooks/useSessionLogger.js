@@ -35,6 +35,10 @@ export const EVENT = {
   VISIBILITY_CHANGE: 'visibility_change',
   SESSION_COMPLETE: 'session_complete',
   EXPORT: 'export',
+  // Exposure markers. The protocol declares a floor that gates participant inclusion, and before
+  // these there was no data with which to apply it: nothing recorded that a reader had actually
+  // reached the end of what their arm had to show.
+  EXPOSURE_MILESTONE: 'exposure_milestone',
 }
 
 /**
@@ -88,11 +92,35 @@ function newSessionId() {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
+export function useSessionLogger({ condition, reducedMotion, participantCode = null, enabled = true }) {
+  /*
+   * The participant code is the consent gate. No code, no logging.
+   *
+   * Consent is taken on the survey platform before the artefact is reached, and the platform hands
+   * over the code, so a valid code is evidence that consent happened. Its absence means this is a
+   * member of the public, who is not in the study and about whom nothing is recorded: no session
+   * identifier is generated, no event is emitted, and nothing is written to storage.
+   *
+   * This replaces gating on `?study=1`, which only hid the visible harness while logging ran for
+   * everybody. The ethics application told the committee that capture ships disabled; that is now
+   * true of the build, and the mechanism is structural rather than a flag someone must remember.
+   */
+  const consented = Boolean(participantCode)
+  const active = enabled && consented
   const stateRef = useRef(null)
 
   // Lazily initialise once. The session identifier is a random value, not a hash of anything about
   // the participant, so it cannot be reversed into an identity.
+  if (stateRef.current === null && !consented) {
+    // A no-op logger. Every method exists so callers need no conditionals, and none of them records.
+    stateRef.current = {
+      sessionId: null, schemaVersion: SCHEMA_VERSION, seq: 0, events: [], t0: nowMs(),
+      openSection: null, visibleSince: nowMs(), hiddenAccumMs: 0, resumed: false,
+      writable: true, inert: true, enterCounts: {}, lastScrollY: 0,
+      milestones: { enteredExplorer: false, sawClose: false },
+    }
+  }
+
   if (stateRef.current === null) {
     const existing = safeRead(STORAGE_KEY)
     const resumed = Boolean(existing?.sessionId)
@@ -107,23 +135,34 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
       hiddenAccumMs: 0,
       resumed,
       writable: true,
+      inert: false,
+      // Per-section entry counter, so a revisit is distinguishable from a first read and
+      // backtrack_count becomes computable. It was specified in the analysis plan and absent here.
+      enterCounts: existing?.enterCounts ?? {},
+      lastScrollY: typeof window !== 'undefined' ? window.scrollY : 0,
+      milestones: existing?.milestones ?? { enteredExplorer: false, sawClose: false },
     }
   }
 
   const persist = useCallback(() => {
     const s = stateRef.current
+    if (s.inert) return
     const ok = safeWrite(STORAGE_KEY, {
       sessionId: s.sessionId,
       schemaVersion: s.schemaVersion,
+      participantCode,
       events: s.events,
+      enterCounts: s.enterCounts,
+      milestones: s.milestones,
     })
     s.writable = ok
-  }, [])
+  }, [participantCode])
 
   const log = useCallback(
     (type, payload = {}) => {
-      if (!enabled) return
+      if (!active) return
       const s = stateRef.current
+      if (s.inert) return
       s.seq += 1
       s.events.push({
         seq: s.seq,
@@ -134,17 +173,18 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
       })
       persist()
     },
-    [enabled, persist],
+    [active, persist],
   )
 
   // Condition assignment is the first event on the log, which is what makes an arm switch
   // detectable later: the first event is authoritative and any disagreement is evidence.
   useEffect(() => {
-    if (!enabled) return
+    if (!active) return
     const s = stateRef.current
     if (s.events.length === 0) {
       log(EVENT.SESSION_START, {
         condition,
+        participantCode,
         reducedMotion,
         schemaVersion: SCHEMA_VERSION,
         scope: SCOPE.HARNESS,
@@ -154,7 +194,7 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
       log(EVENT.SESSION_RESUMED, { condition, priorEvents: s.events.length - 1, scope: SCOPE.HARNESS })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled])
+  }, [active])
 
   /**
    * Tab visibility. A background tab keeps accumulating elapsed time but nobody is reading, so raw
@@ -164,7 +204,7 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
    * for it.
    */
   useEffect(() => {
-    if (!enabled) return undefined
+    if (!active) return undefined
     const onVisibility = () => {
       const s = stateRef.current
       const hidden = document.visibilityState === 'hidden'
@@ -179,7 +219,7 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
     }
     document.addEventListener('visibilitychange', onVisibility)
     return () => document.removeEventListener('visibilitychange', onVisibility)
-  }, [enabled, log])
+  }, [active, log])
 
   /**
    * Flush the open section when the page goes away.
@@ -205,14 +245,14 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
    * already persisted, because every event writes on emission.
    */
   useEffect(() => {
-    if (!enabled) return undefined
+    if (!active) return undefined
     const flush = () => {
       if (stateRef.current.openSection) closeOpen('page-hidden')
     }
     window.addEventListener('pagehide', flush)
     return () => window.removeEventListener('pagehide', flush)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled])
+  }, [active])
 
   /**
    * Close whatever section or explorer view is currently open, and emit its dwell.
@@ -253,8 +293,34 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
       // Close any section still open. Scrollama can fire an enter without a matching exit when a
       // fast scroll skips a step, and a keyboard jump deliberately skips several.
       if (s.openSection && s.openSection.id !== sectionId) closeOpen('superseded')
+
+      /*
+       * Entry index and scroll direction.
+       *
+       * Both were specified in the telemetry analysis plan and neither existed, which made
+       * `backtrack_count` uncomputable. It is one of only two behavioural measures both arms can
+       * emit, so without it the between-condition behavioural comparison rested on a single measure.
+       *
+       * entryIndex is 1 on the first visit to a step and increments on every return, so a revisit is
+       * distinguishable from a first read without inferring it from event order. direction compares
+       * the current scroll position with the last recorded one: 'up' is a backtrack. A keyboard jump
+       * reports 'jump', because its direction is not a reading behaviour.
+       */
+      const count = (s.enterCounts[sectionId] ?? 0) + 1
+      s.enterCounts[sectionId] = count
+      const y = typeof window !== 'undefined' ? window.scrollY : 0
+      const direction =
+        navigationSource !== 'scroll' ? 'jump' : y < s.lastScrollY ? 'up' : 'down'
+      s.lastScrollY = y
+
       openSection(sectionId, SCOPE.BOTH)
-      log(EVENT.SECTION_ENTER, { sectionId, navigationSource, scope: SCOPE.BOTH })
+      log(EVENT.SECTION_ENTER, {
+        sectionId,
+        navigationSource,
+        entryIndex: count,
+        direction,
+        scope: SCOPE.BOTH,
+      })
     },
     [log, closeOpen, openSection],
   )
@@ -293,6 +359,10 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
       if (s.openSection && s.openSection.id !== view) closeOpen('explorer-view-change')
       log(EVENT.EXPLORER_PHASE_ENTERED, { view, scope: SCOPE.INTERACTIVE_ONLY })
       openSection(view, SCOPE.INTERACTIVE_ONLY)
+      if (!s.milestones.enteredExplorer) {
+        s.milestones.enteredExplorer = true
+        log(EVENT.EXPOSURE_MILESTONE, { milestone: 'entered_explorer', scope: SCOPE.INTERACTIVE_ONLY })
+      }
     },
     [log, closeOpen, openSection],
   )
@@ -326,6 +396,47 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
     return payload
   }, [condition, reducedMotion, log])
 
+  /**
+   * Record that the reader reached the close, E7.
+   *
+   * Called from both arms: the interactive arm when the E7 view is entered, the static arm when the
+   * small-multiple equivalent is rendered. Scope is 'both', because it is the same construct in each
+   * and the exposure floor has to be applicable to both.
+   */
+  const sawClose = useCallback(() => {
+    const s = stateRef.current
+    if (s.inert || s.milestones.sawClose) return
+    s.milestones.sawClose = true
+    log(EVENT.EXPOSURE_MILESTONE, { milestone: 'saw_close', scope: SCOPE.BOTH })
+  }, [log])
+
+  /** The raw material the return code needs: dwell vectors and interaction counts, derived. */
+  const summarise = useCallback(() => {
+    const s = stateRef.current
+    const dwellS = {}
+    const visibleDwellS = {}
+    const interactions = {}
+    for (const e of s.events) {
+      if (e.type === EVENT.SECTION_EXIT) {
+        dwellS[e.sectionId] = (dwellS[e.sectionId] ?? 0) + (e.dwellS ?? 0)
+        visibleDwellS[e.sectionId] = (visibleDwellS[e.sectionId] ?? 0) + (e.visibleDwellS ?? 0)
+      } else if (e.type === EVENT.CONTROL_INTERACTION) {
+        interactions[e.control] = (interactions[e.control] ?? 0) + 1
+      }
+    }
+    const last = s.events[s.events.length - 1]
+    return {
+      dwellS,
+      visibleDwellS,
+      interactions,
+      sessionSeconds: last?.t ?? 0,
+      eventCount: s.events.length,
+      milestones: { ...s.milestones },
+      resumed: s.events.some((e) => e.type === EVENT.SESSION_RESUMED),
+      visitedSteps: [...new Set(s.events.filter((e) => e.type === EVENT.SECTION_ENTER).map((e) => e.sectionId))],
+    }
+  }, [])
+
   /** State persistence for the explorer, so E1.1 remembers the last cross-filter state. */
   const saveExplorerState = useCallback((partial) => safeWrite(STATE_KEY, partial), [])
   const loadExplorerState = useCallback(() => safeRead(STATE_KEY), [])
@@ -342,8 +453,12 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
   return useMemo(
     () => ({
       sessionId: stateRef.current.sessionId,
+      consented,
+      inert: stateRef.current.inert,
       eventCount: () => stateRef.current.events.length,
       writable: () => stateRef.current.writable,
+      summarise,
+      sawClose,
       log,
       sectionEnter,
       sectionExit,
@@ -356,6 +471,9 @@ export function useSessionLogger({ condition, reducedMotion, enabled = true }) {
       clearAll,
     }),
     [
+      consented,
+      summarise,
+      sawClose,
       log,
       sectionEnter,
       sectionExit,
