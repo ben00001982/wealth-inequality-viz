@@ -42,6 +42,20 @@ export const initialState = {
   zoomStep: 0,
   reducedMotion: false,
   dataIsSynthetic: true,
+  /*
+   * Exposure milestones live here, not in the telemetry hook.
+   *
+   * They were in a ref inside useSessionLogger, which mutated without triggering a render. The
+   * return panel reads them to decide whether the exposure floor is met, so it rendered one step
+   * behind and, in the static arm, never re-rendered at all: the last milestone arrives on the same
+   * state change that produced the final render, so nothing followed it. The static arm therefore
+   * never released its return code, which would have lost every static participant's behavioural
+   * data.
+   *
+   * The rule this enforces: anything the interface renders from is reducer state. The logger records
+   * facts; it does not hold them.
+   */
+  milestones: { enteredExplorer: false, sawClose: false },
 }
 
 export function appReducer(state, action) {
@@ -74,6 +88,11 @@ export function appReducer(state, action) {
         selection: { ...state.selection, [action.field]: action.value },
         compare: { ...state.compare, a: { ...state.compare.a, [action.field]: action.value } },
       }
+    }
+
+    case 'REACH_MILESTONE': {
+      if (state.milestones[action.milestone]) return state // idempotent: fire once, record once
+      return { ...state, milestones: { ...state.milestones, [action.milestone]: true } }
     }
 
     case 'ENTER_EXPLORER':
