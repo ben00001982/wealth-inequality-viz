@@ -13,7 +13,7 @@ async function open(cond, opts = {}) {
   const errs = []
   p.on('pageerror', e => errs.push(e.message))
   p.on('console', m => { if (m.type() === 'error') errs.push(m.text()) })
-  await p.goto(`file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-${cond}.html?study=1`)
+  await p.goto(`file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-${cond}.html?study=1&pid=TEST0001`)
   await p.waitForTimeout(1200)
   return { ctx, p, errs }
 }
@@ -92,7 +92,7 @@ for (const cond of ['interactive','static']) {
   await p.getByRole('button',{name:'Mark session complete'}).click()
   await p.waitForTimeout(300)
   const dl = p.waitForEvent('download', { timeout: 8000 }).catch(() => null)
-  await p.getByRole('button',{name:/Download my session file/}).click()
+  await p.getByRole('button',{name:/Download the raw log/}).click()
   const d = await dl
   let parsed = null, name = null
   if (d) { name = d.suggestedFilename(); const path = await d.path(); parsed = JSON.parse(readFileSync(path,'utf8')) }
@@ -123,7 +123,7 @@ for (const cond of ['interactive','static']) {
     const boom = () => { throw new DOMException('blocked','SecurityError') }
     Object.defineProperty(window,'localStorage',{ get(){ return { getItem:boom, setItem:boom, removeItem:boom } } })
   })
-  await p.goto('file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1')
+  await p.goto('file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1&pid=TEST0001')
   await p.waitForTimeout(1500)
   await p.evaluate(() => document.querySelector('[data-step-id="S3"]')?.scrollIntoView({block:'center'}))
   await p.waitForTimeout(900)

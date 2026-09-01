@@ -1,7 +1,7 @@
 import { chromium } from 'playwright'
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 const KEY='wviz.session.v3'
-const URL='file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1'
+const URL='file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1&pid=TEST0001'
 
 /* --- explorer view dwell now exists, and the last view is closed on pagehide --- */
 const ctx = await b.newContext({ viewport:{width:1400,height:900}, offline:true })

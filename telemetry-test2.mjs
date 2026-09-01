@@ -6,7 +6,7 @@ const KEY='wviz.session.v3'
 {
   const ctx = await b.newContext({ viewport:{width:1400,height:900}, offline:true })
   const p = await ctx.newPage()
-  await p.goto('file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1')
+  await p.goto('file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1&pid=TEST0001')
   await p.waitForTimeout(1200)
   await p.evaluate(() => document.querySelector('[data-step-id="S1"]')?.scrollIntoView({block:'center'}))
   await p.waitForTimeout(600)
@@ -35,7 +35,7 @@ const KEY='wviz.session.v3'
 {
   const ctx = await b.newContext({ viewport:{width:1400,height:900}, offline:true })
   const p = await ctx.newPage()
-  await p.goto('file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1')
+  await p.goto('file:///home/claude/wealth-inequality-viz/wealth-viz-prototype-interactive.html?study=1&pid=TEST0001')
   await p.waitForTimeout(1200)
   for (const s of ['S1','S5','S18']) {
     await p.evaluate(x => document.querySelector(`[data-step-id="${x}"]`)?.scrollIntoView({block:'center'}), s)
