@@ -140,3 +140,29 @@ Explorer seed state is `localStorage` only, so the spec-native way to pre-seed a
 artefact beforehand in a dedicated browser profile. A demo-only deep link that seeds profile and
 selection from the query string would make the viva demo more robust, and is listed in the viva pack
 as an optional additive P4 item.
+
+
+---
+
+## Revision, 24 August 2026
+
+Three things in this document predate later work and are corrected here.
+
+**Chart sizing.** `width: "container"` was resolving to zero on every single-view spec, so those
+charts rendered an SVG with `width="0"`: present in the DOM, marks inside it, nothing on screen. The
+cause is that vega-embed wraps the view in a `display: inline-block` div, which has no intrinsic width
+to measure. Three CSS rules in `src/index.css` force that wrapper to a full-width block. The bug only
+showed on single-view specs, because the concat and facet specs set explicit pixel widths and never
+consult the container. Removing those rules empties every chart again.
+
+**Milestones are reducer state.** A new `milestones` slice holds `enteredExplorer` and `sawClose`.
+They were briefly held in a ref inside the telemetry hook, which mutated without triggering a render,
+and the consequence was that the static arm never released its study return code. The rule: anything
+the interface renders from is reducer state. The logger records facts; it does not hold them.
+
+**The telemetry hook has a consent gate.** `useSessionLogger` takes a `participantCode` and is inert
+without one: no session identifier, no events, no storage writes. See `docs/STUDY-HARNESS.md` for why
+the code is the consent token and how reload recovery works without weakening the gate.
+
+**One new module.** `src/study/returnCode.js` encodes and decodes the behavioural record as a short
+checksummed string, replacing a file export the participant would have had to send by hand.

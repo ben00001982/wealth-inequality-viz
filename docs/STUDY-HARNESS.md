@@ -127,3 +127,111 @@ its own screen rather than leaving it to a footer button, and by treating teleme
 participants as retained for the primary comprehension test with the cost stated, since the
 comprehension instrument is captured separately. Exclusion rules and thresholds are fixed in advance
 in `wealth-viz_p5-telemetry-analysis-plan_v1`, before any data exists.
+
+
+---
+
+## Revision, 24 August 2026: the study flow as built
+
+This section supersedes any description above that predates it. Four gaps were closed after an
+adversarial verification pass, and one of them made the difference between having behavioural data and
+having none.
+
+### The participant code is the consent gate
+
+Consent is taken on the survey platform before the artefact is reached. The platform then hands over a
+code as `?pid=`, and the artefact treats the presence of a valid code as evidence that a consent step
+happened. No code means no session identifier, no events, and nothing written to storage.
+
+This replaced gating on `?study=1`, which hid only the visible harness while logging ran for every
+visitor. The ethics application told the committee that capture ships disabled; that was not true of
+the build, and it is now, by a mechanism that cannot drift rather than a flag someone must remember.
+
+A code is honoured only alongside an explicit, valid `?condition=`. Two failure modes, one rule: a
+malformed condition would fall back to the default arm, and a missing one would do the same, so either
+way the session would be recorded in an arm nobody allocated it to, silently and always the same arm.
+A legitimate link generated from the block-randomised list carries both, so a code without a valid
+condition is a truncated or edited link and is refused with a visible message.
+
+Format for the code is `[A-Za-z0-9_-]{4,64}`. Anything else is refused rather than sanitised.
+
+### Reload recovery
+
+Both parameters are stripped from the address bar as soon as they are read, so a plain reload lands on
+a URL with no code. Without recovery the page would go inert, the return panel would never render, and
+a participant who had done the reading would be stranded with no way to finish. So a code already
+recorded against a session in this browser is treated as still in force, and the session logs
+`session_resumed`. This stores nothing new, because the code is already inside the session object, and
+it does not weaken the gate: a visitor with neither a code in the URL nor a session in storage is
+still inert. A recovered session is flagged, because its arm cannot be re-checked against the link and
+the per-protocol sensitivity analysis should report it separately.
+
+### The return code replaces the file export
+
+The protocol's step 13 asked the participant to press a download button, find the resulting JSON file
+and send it to the researcher. That would have lost data from every participant who declined, forgot,
+or could not find their downloads folder, and the loss would not have been random: someone who
+struggles with a file operation is plausibly also someone who found the artefact hard, so the missing
+data would have correlated with the outcome.
+
+Instead the artefact encodes the whole behavioural record as one short string, about 140 characters:
+version, participant code, arm, session length, event count, four flags, the per-step dwell vector,
+the visible-dwell vector, interaction counts, and an FNV-1a checksum. Base 36 for the numbers, because
+dwell is whole seconds and three digits cover thirteen hours.
+
+Two routes. If the survey platform supplied `?return=` (https only), the button sends the participant
+back with the code appended as `?wviz=`, and the platform captures it on arrival with no participant
+action at all. This is the route the protocol should use. Otherwise the code is displayed for copying,
+with a clipboard write, a select-on-focus fallback, and the code visible either way, because a
+clipboard write can fail silently in a frame.
+
+The checksum is the part that is easy to omit and should not be. A pasted code can lose a character or
+be truncated by a field limit, and a corrupted dwell vector that still parses is worse than one that
+fails, because it enters the analysis silently. `decodeReturnCode` ships beside the encoder so the
+survey platform can validate at the point of entry, while the participant is still on the page.
+
+### Exposure milestones and the floor
+
+The protocol declares an exposure floor gating participant inclusion, and there was previously no data
+with which to apply it. Two milestones now record it: `entered_explorer`, interactive-only, and
+`saw_close`, scoped to both arms because E7 is the last thing either arm shows.
+
+The floor is per-arm, defined once in `EXPOSURE_REQUIREMENTS` so the artefact and the analysis cannot
+disagree. The static arm requires S18 and the close; the interactive arm additionally requires the
+explorer. That asymmetry is not a parity breach: it is the same construct, having seen everything that
+arm has to show, and requiring an explorer visit of a static participant would exclude all of them.
+
+Milestones live in reducer state, not in the logger. They were in a ref, which mutated without
+triggering a render, so the return panel read them one render behind and in the static arm never
+re-rendered at all: the last milestone arrives on the same state change that produced the final
+render, and nothing follows it. The static arm therefore never released its code, which would have
+lost every static participant's behavioural data. The rule that prevents a recurrence: anything the
+interface renders from is reducer state, and the logger records facts rather than holding them.
+
+The code is withheld until the floor is met, but a participant who wants to stop early can say so and
+receives the code with the incomplete flag set. Blocking them outright would strand them mid-study
+with no way to claim payment, which is its own ethics problem.
+
+### Two new fields on `section_enter`
+
+`entryIndex` counts visits to that step, starting at 1, so a revisit is distinguishable from a first
+read without inferring it from event order. `direction` is `up`, `down` or `jump`, comparing scroll
+position with the last recorded one; `jump` marks keyboard navigation, whose direction is not a
+reading behaviour. Together they make `backtrack_count` computable, which was specified in the
+analysis plan and had no data behind it. It is one of only two behavioural measures both arms can
+emit, so without it the between-condition behavioural comparison rested on a single measure.
+
+### What the study bar shows now
+
+It appears for a participant session or for a researcher walkthrough with `?study=1`. The arm is
+printed only in the researcher view, never to a participant, because the earlier behaviour printed it
+whenever the flag was set: fixing the export gate would have destroyed allocation concealment. The
+file export is retained as a researcher fallback only.
+
+### Verified, not asserted
+
+Every claim in this section was tested in a headless browser: the consent gate against six URL
+permutations, the reload recovery, the exposure gate in both arms, the return-code structure and
+checksum, the entry index and direction across a deliberate backtrack, and the absence of any
+`interactive-only` event in the static arm. The suites are `study-test.mjs`, `guard-test.mjs`,
+`resume-test.mjs` and `telemetry-test*.mjs`.
