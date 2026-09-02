@@ -129,7 +129,13 @@ export function useSessionLogger({ condition, reducedMotion, participantCode = n
       schemaVersion: SCHEMA_VERSION,
       seq: existing?.events?.length ?? 0,
       events: existing?.events ?? [],
-      t0: nowMs(),
+      /*
+       * On a resume, t0 is pushed back so that `t` continues from where the stored log left off
+       * rather than restarting at zero. Without this the offsets are not monotonic across a reload:
+       * restored events keep their old values while new ones start again from 0, so any duration
+       * derived from the last event's `t` understates a resumed session, silently.
+       */
+      t0: nowMs() - (existing?.events?.[existing.events.length - 1]?.t ?? 0) * 1000,
       openSection: null,
       visibleSince: nowMs(),
       hiddenAccumMs: 0,
@@ -379,6 +385,8 @@ export function useSessionLogger({ condition, reducedMotion, participantCode = n
     const payload = {
       sessionId: s.sessionId,
       schemaVersion: SCHEMA_VERSION,
+      // The join key was missing from the export, so pilot files could only be matched by hand.
+      participantCode,
       condition,
       reducedMotion,
       // No absolute timestamps: only the offsets already on each event.
@@ -394,7 +402,7 @@ export function useSessionLogger({ condition, reducedMotion, participantCode = n
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
     return payload
-  }, [condition, reducedMotion, log])
+  }, [condition, reducedMotion, participantCode, log])
 
   /**
    * Record that the reader reached the close, E7.
@@ -415,19 +423,42 @@ export function useSessionLogger({ condition, reducedMotion, participantCode = n
     const s = stateRef.current
     const dwellS = {}
     const visibleDwellS = {}
+    const revisits = {}
     const interactions = {}
     for (const e of s.events) {
       if (e.type === EVENT.SECTION_EXIT) {
         dwellS[e.sectionId] = (dwellS[e.sectionId] ?? 0) + (e.dwellS ?? 0)
         visibleDwellS[e.sectionId] = (visibleDwellS[e.sectionId] ?? 0) + (e.visibleDwellS ?? 0)
+      } else if (e.type === EVENT.SECTION_ENTER) {
+        // Entries beyond the first. entryIndex is 1 on a first read, so a step read once contributes
+        // nothing and only genuine returns register. This is the backtrack measure.
+        if ((e.entryIndex ?? 1) > 1) revisits[e.sectionId] = (revisits[e.sectionId] ?? 0) + 1
       } else if (e.type === EVENT.CONTROL_INTERACTION) {
         interactions[e.control] = (interactions[e.control] ?? 0) + 1
       }
     }
+    /*
+     * Include the section that is still open.
+     *
+     * Dwell is written on exit, so whatever the reader is looking at when the return code is
+     * generated contributes nothing. That is not a marginal loss: the reader takes the code at the
+     * end, so the open section is always the close, E7, whose dwell is one of the measures the study
+     * most wants. Adding the elapsed time of the open section here fixes it for the return code
+     * without emitting a duplicate exit event, which would double-count once pagehide fires.
+     */
+    const open = s.openSection
+    if (open) {
+      const elapsedS = Math.round((nowMs() - open.at) / 1000)
+      const hiddenS = Math.round((s.hiddenAccumMs - open.hiddenAt) / 1000)
+      dwellS[open.id] = (dwellS[open.id] ?? 0) + elapsedS
+      visibleDwellS[open.id] = (visibleDwellS[open.id] ?? 0) + Math.max(0, elapsedS - hiddenS)
+    }
+
     const last = s.events[s.events.length - 1]
     return {
       dwellS,
       visibleDwellS,
+      revisits,
       interactions,
       sessionSeconds: last?.t ?? 0,
       eventCount: s.events.length,
