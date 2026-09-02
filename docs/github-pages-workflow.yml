@@ -1,21 +1,12 @@
-# MOVE THIS FILE TO .github/workflows/deploy.yml
-#
-# It is parked here because the personal access token used to create this repository does not carry
-# the `workflow` scope, so GitHub refuses to write anything under .github/workflows through the API.
-# One local commit puts it where it belongs:
-#
-#   mkdir -p .github/workflows
-#   git mv docs/github-pages-workflow.yml .github/workflows/deploy.yml
-#   git commit -m "Add Pages deploy workflow" && git push
-#
-# Then enable Pages in the repository settings with the source set to GitHub Actions.
-#
-# Everything below this line is the working tree's .github/workflows/deploy.yml verbatim. Delete
-# this header when the file is moved: the comments in the body are the ones worth keeping.
-#
-# ---------------------------------------------------------------------------------------------
-
 # Build the artefact and publish it to GitHub Pages.
+#
+# THIS FILE IS PARKED. Move it to .github/workflows/deploy.yml for it to run. It lives here because a
+# personal access token without the workflow scope cannot write to .github/workflows, so it could not
+# be pushed into place. One command, from the repository root:
+#
+#     git mv docs/github-pages-workflow.yml .github/workflows/deploy.yml
+#
+# Then enable Pages in the repository settings with Source set to GitHub Actions.
 #
 # What this does NOT do, deliberately: it does not run the Python pipeline. The raw Office for
 # National Statistics downloads are not committed (see .gitignore, and the acquisition manifest for

@@ -27,13 +27,20 @@
  * still parses is worse than one that fails, because it enters the analysis silently. The FNV-1a hash
  * on the end lets the decoder reject a damaged code, and the survey platform can validate it inline.
  *
+ * Version 4, 1 September 2026. Two additions, both because a measure was specified and had no data
+ * reaching the researcher. The event log carried `entryIndex` and `direction` on every step entry,
+ * which is what makes `backtrack_count` computable, but the return code did not carry them: the code
+ * is the only thing that reaches the researcher for the main sample, so the measure was still empty.
+ * It now carries a per-step revisit count. And the dwell vectors now span the explorer views as well
+ * as the narrative steps, so per-view dwell is tier one rather than pilot-only.
+ *
  * What this deliberately does NOT carry: no free text, no timestamps, no user agent, no viewport, no
  * answers to any comprehension item. The instrument lives on the survey platform and the two are
  * joined by the participant code. See wealth-viz_p5-data-management-plan_v1 for why each field
  * survives, and docs/STUDY-HARNESS.md for the schema.
  */
 
-export const RETURN_CODE_VERSION = 3
+export const RETURN_CODE_VERSION = 4
 const SEP = '~'
 const FIELD_SEP = '.'
 
@@ -63,6 +70,7 @@ const unb36 = (s) => parseInt(s, 36) || 0
  * @param {string[]} p.stepOrder      the canonical step ids, so position in the vector is meaningful
  * @param {object} p.dwellS           {stepId: seconds} total dwell
  * @param {object} p.visibleDwellS    {stepId: seconds} dwell with hidden time removed
+ * @param {object} p.revisits        {stepId: entries beyond the first} the backtrack measure
  * @param {object} p.interactions     {controlName: count}
  * @param {object} p.flags            {reducedMotion, exposureComplete, resumed, storageWritable}
  * @param {number} p.sessionSeconds   total session length in seconds
@@ -74,6 +82,7 @@ export function encodeReturnCode({
   stepOrder,
   dwellS = {},
   visibleDwellS = {},
+  revisits = {},
   interactions = {},
   flags = {},
   sessionSeconds = 0,
@@ -94,6 +103,9 @@ export function encodeReturnCode({
     ].join(''),
     stepOrder.map((s) => b36(dwellS[s] ?? 0)).join(FIELD_SEP),
     stepOrder.map((s) => b36(visibleDwellS[s] ?? 0)).join(FIELD_SEP),
+    // Revisits: entries beyond the first, per step. Zero for a step read once, which is most of them,
+    // so the field stays short. This is the data behind backtrack_count.
+    stepOrder.map((s) => b36(revisits[s] ?? 0)).join(FIELD_SEP),
     Object.entries(interactions)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => `${k}:${b36(v)}`)
@@ -121,7 +133,7 @@ export function decodeReturnCode(code, stepOrder) {
   if (checksum(body) !== given) {
     return { ok: false, reason: 'checksum-failed' }
   }
-  const [version, pid, cond, sess, events, flagBits, dwellV, visV, inter] = body.split(SEP)
+  const [version, pid, cond, sess, events, flagBits, dwellV, visV, revV, inter] = body.split(SEP)
   if (version !== `v${RETURN_CODE_VERSION}`) {
     return { ok: false, reason: `version-mismatch:${version}` }
   }
@@ -148,6 +160,7 @@ export function decodeReturnCode(code, stepOrder) {
       storageWritable: flagBits[3] === '1',
       dwellS: zip(dwellArr),
       visibleDwellS: zip(visArr),
+      revisits: zip((revV || '').split(FIELD_SEP).map(unb36)),
       interactions: Object.fromEntries(
         (inter || '')
           .split(FIELD_SEP)

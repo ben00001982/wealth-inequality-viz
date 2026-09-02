@@ -36,3 +36,7 @@ venv/
 /dbg.mjs
 /shots.mjs
 /test-results/
+
+# Simulated fixture output. Regenerable with `python analysis/simulate.py`.
+analysis/simulated/
+analysis/__pycache__/
