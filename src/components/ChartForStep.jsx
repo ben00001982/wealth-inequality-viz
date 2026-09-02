@@ -35,7 +35,7 @@ import { CAVEAT_SHORT } from '../data/narrative.js'
  * never adds data. Read the guard in each builder: `staged` only ever moves colour between
  * emphasis and muted.
  */
-export function ChartForStep({ step, data, condition, reducedMotion, readerValue }) {
+export function ChartForStep({ step, data, condition, reducedMotion, readerValue, logger }) {
   const staged = condition === 'interactive' && !reducedMotion
   const caveat = step.caveat ? CAVEAT_SHORT : undefined
 
@@ -53,6 +53,11 @@ export function ChartForStep({ step, data, condition, reducedMotion, readerValue
       description={describeStep(step)}
       tableRows={built.tableRows}
       tableColumns={built.tableColumns}
+      onTableToggle={(open) =>
+        // Scope 'both': the disclosure exists identically in each arm, so it is one of the few
+        // controls a between-condition comparison may legitimately use.
+        open && logger?.controlInteraction('data-table', { step: step.id }, 'both')
+      }
     />
   )
 }
