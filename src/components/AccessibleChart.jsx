@@ -42,6 +42,15 @@ export function AccessibleChart({
   actions = false,
   className = '',
   onEmbed,
+  /*
+   * Optional. When supplied, opening the data table is recorded as a `both`-scoped interaction.
+   *
+   * It was not instrumented at all, which mattered more than it sounds: it is one of only two
+   * controls present in both arms, so without it the between-condition behavioural comparison rested
+   * on a single measure. Optional rather than required so a chart rendered outside a study session,
+   * or in a test, needs no logger.
+   */
+  onTableToggle,
 }) {
   const baseId = useId()
   const titleId = `${baseId}-title`
@@ -83,7 +92,10 @@ export function AccessibleChart({
       <VisuallyHidden id={descId}>{description}</VisuallyHidden>
 
       {tableRows?.length > 0 && (
-        <details className="chart__table">
+        <details
+          className="chart__table"
+          onToggle={(e) => onTableToggle?.(e.currentTarget.open, title)}
+        >
           <summary>Show the numbers behind this chart</summary>
           <DataTable caption={title} rows={tableRows} columns={tableColumns} />
         </details>

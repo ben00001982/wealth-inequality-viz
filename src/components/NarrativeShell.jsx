@@ -92,6 +92,7 @@ export function NarrativeShell({ state, dispatch, data, logger, readerValue }) {
                     data={data}
                     condition={condition}
                     reducedMotion={reducedMotion}
+                    logger={logger}
                   />
                 ))}
               </div>
@@ -102,6 +103,7 @@ export function NarrativeShell({ state, dispatch, data, logger, readerValue }) {
                 condition={condition}
                 reducedMotion={reducedMotion}
                 readerValue={readerValue}
+                logger={logger}
               />
             )}
             {active.caveat && <MissingTopCaveat variant={active.id === 'S16' ? 'full' : 'short'} />}

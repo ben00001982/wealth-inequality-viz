@@ -1,8 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Button } from 'react-aria-components'
 import { buildReturnUrl, encodeReturnCode } from '../../study/returnCode.js'
 import { isExposureComplete } from '../../state/conditions.js'
 import { stepIds } from '../../data/narrative.js'
+import { EXPLORER_VIEW } from '../../state/appReducer.js'
+
+/*
+ * The dwell vector spans the narrative steps AND the explorer views.
+ *
+ * It used to be `stepIds` alone, S0 to S18, which meant every explorer measure reached the researcher
+ * only in the pilot's raw exports and was tier two for the main sample. The explorer views are logged
+ * through the same open-and-close machinery as steps, so they belong in the same vector; the static
+ * arm simply reports zero for them, which is correct and is what the parity filter expects.
+ */
+const CODE_STEP_ORDER = [...stepIds, ...Object.values(EXPLORER_VIEW)]
 
 /**
  * The end of the study session: how the participant gets back to the survey with their data.
@@ -42,7 +53,6 @@ export function ReturnPanel({ state, logger, participantCode, returnUrl }) {
    * is cheap and returns empty structures when the logger is inert, so running it unconditionally
    * costs nothing.
    */
-  const summary = logger.summarise()
   // Milestones come from reducer state, so a change to one re-renders this panel. Reading them from
   // the logger's ref left the gate a render behind and the static arm never opened it at all.
   const complete = isExposureComplete(state.condition, {
@@ -51,29 +61,57 @@ export function ReturnPanel({ state, logger, participantCode, returnUrl }) {
     sawClose: state.milestones.sawClose,
   })
 
-  const code = useMemo(
-    () =>
-      !participantCode
-        ? ''
-        : encodeReturnCode({
-            participantCode,
-            condition: state.condition,
-            stepOrder: stepIds,
-            dwellS: summary.dwellS,
-            visibleDwellS: summary.visibleDwellS,
-            interactions: summary.interactions,
-            flags: {
-              exposureComplete: complete,
-              reducedMotion: state.reducedMotion,
-              resumed: summary.resumed,
-              storageWritable: logger.writable(),
-            },
-            sessionSeconds: summary.sessionSeconds,
-            eventCount: summary.eventCount,
-          }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [participantCode, state.condition, state.reducedMotion, complete, JSON.stringify(summary)],
-  )
+  /*
+   * The code is generated on demand, not during render.
+   *
+   * It used to be a useMemo over the logger summary, which looked right and was wrong in a way that
+   * cost the single most wanted measure. Dwell for the section still open is computed at the moment
+   * summarise() runs, and no render happens while a reader sits reading the final view. So the code
+   * captured the instant E7 opened, and E7 dwell was always zero: the close, whose dwell is the
+   * point of the whole zoom-out sequence.
+   *
+   * Generating in the handler means the code reflects the state at the moment the participant takes
+   * it, which is also the only moment that means anything. A slow refresh keeps the displayed code
+   * current for a reader who selects it by hand rather than pressing the button, and it is slow
+   * because each regeneration walks the event list.
+   */
+  const generate = useCallback(() => {
+    if (!participantCode) return ''
+    const s = logger.summarise()
+    const done = isExposureComplete(state.condition, {
+      visitedSteps: state.visitedSteps,
+      enteredExplorer: state.milestones.enteredExplorer,
+      sawClose: state.milestones.sawClose,
+    })
+    return encodeReturnCode({
+      participantCode,
+      condition: state.condition,
+      stepOrder: CODE_STEP_ORDER,
+      dwellS: s.dwellS,
+      visibleDwellS: s.visibleDwellS,
+      revisits: s.revisits,
+      interactions: s.interactions,
+      flags: {
+        exposureComplete: done,
+        reducedMotion: state.reducedMotion,
+        resumed: s.resumed,
+        storageWritable: logger.writable(),
+      },
+      sessionSeconds: s.sessionSeconds,
+      eventCount: s.eventCount,
+    })
+  }, [participantCode, logger, state.condition, state.reducedMotion, state.visitedSteps, state.milestones])
+
+  const [code, setCode] = useState('')
+
+  useEffect(() => {
+    if (!participantCode) return undefined
+    const released = complete || acknowledgedEarly
+    if (!released) return undefined
+    setCode(generate())
+    const id = setInterval(() => setCode(generate()), 10000)
+    return () => clearInterval(id)
+  }, [participantCode, complete, acknowledgedEarly, generate])
 
   // Not a study session. A member of the public who finds the artefact sees the artefact.
   if (!participantCode) return null
@@ -129,9 +167,13 @@ export function ReturnPanel({ state, logger, participantCode, returnUrl }) {
                   logger.sessionComplete({
                     exposureComplete: complete,
                     route: 'redirect',
-                    visitedSteps: summary.visitedSteps.length,
+                    visitedSteps: state.visitedSteps.length,
                   })
-                  window.location.assign(target)
+                  // Regenerate at the moment of departure: the dwell on this last view is only
+                  // known now, and it is the measure the close exists to produce.
+                  const fresh = generate()
+                  const url = returnUrl ? buildReturnUrl(returnUrl, fresh) : null
+                  window.location.assign(url ?? target)
                 }}
               >
                 Back to the questions
@@ -157,8 +199,10 @@ export function ReturnPanel({ state, logger, participantCode, returnUrl }) {
               <Button
                 className="button button--primary"
                 onPress={async () => {
+                  const fresh = generate()
+                  setCode(fresh)
                   try {
-                    await navigator.clipboard.writeText(code)
+                    await navigator.clipboard.writeText(fresh)
                     setCopied(true)
                   } catch {
                     // Clipboard writes fail silently in some frames. The code is on screen anyway,
@@ -169,7 +213,7 @@ export function ReturnPanel({ state, logger, participantCode, returnUrl }) {
                   logger.sessionComplete({
                     exposureComplete: complete,
                     route: 'paste',
-                    visitedSteps: summary.visitedSteps.length,
+                    visitedSteps: state.visitedSteps.length,
                   })
                 }}
               >
